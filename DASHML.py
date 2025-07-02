@@ -160,14 +160,37 @@ URGENCY_COLORS = {
     'Ninguna': '#28A745'
 }
 
-@st.cache_data
 def load_data():
-    """Carga los datos del CSV"""
+    """Carga datos desde CSV local O archivo subido por el usuario"""
+    # Opción 1: Selector de archivos (nuevo)
+    uploaded_file = st.file_uploader(
+        "📤 Sube tu propio archivo (opcional)", 
+        type=['csv', 'xlsx', 'parquet', 'json']
+    )
+    
+    if uploaded_file:  # Si el usuario subió un archivo
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            elif uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file)
+            elif uploaded_file.name.endswith('.parquet'):
+                df = pd.read_parquet(uploaded_file)
+            elif uploaded_file.name.endswith('.json'):
+                df = pd.read_json(uploaded_file)
+            st.success(f"Archivo {uploaded_file.name} cargado correctamente!")
+            return df
+        except Exception as e:
+            st.error(f"❌ Error al cargar archivo: {str(e)}")
+            return None
+    
+    # Opción 2: Carga el CSV local (tu versión original)
     try:
         df = pd.read_csv("Dataset_de_prueba__50_registros_ - Dataset_de_prueba__50_registros_.csv")
+        st.info("✅ Usando dataset local por defecto")
         return df
     except FileNotFoundError:
-        st.error("❌ No se encontró el archivo Dataset_de_prueba__50_registros_ - Dataset_de_prueba__50_registros_.csv")
+        st.error("❌ No se encontró el archivo local Dataset_de_prueba__50_registros_.csv")
         return None
 
 def load_model():
@@ -311,7 +334,8 @@ def main():
 
 def show_real_time_monitoring(current_row, model, feature_columns, target_columns):
     """Muestra el monitoreo en tiempo real"""
-    st.header("📊 Estado Actual del Generador")
+    with st.container():
+       st.header("📊 Estado Actual del Generador")
 
     # Timestamp simulado
     timestamp = datetime.now() - timedelta(minutes=st.session_state.current_sample)
@@ -405,7 +429,8 @@ def show_real_time_monitoring(current_row, model, feature_columns, target_column
 
 def show_historical_analysis(df):
     """Muestra el análisis histórico"""
-    st.header("📈 Análisis Histórico de Parámetros")
+    with st.container():
+       st.header("📈 Análisis Histórico de Parámetros")
     
     # Selector de parámetros
     params = ['presion_aceite', 'voltaje_bateria', 'voltaje_alternador', 
@@ -460,7 +485,8 @@ def show_historical_analysis(df):
 
 def show_fault_management_ml(current_row, model, feature_columns, target_columns):
     """Muestra la gestión de fallas"""
-    st.header("⚠️ Gestión de Fallas")
+    with st.container():
+       st.header("⚠️ Gestión de Fallas")
 
     # Mapeo de parámetros a claves de sensor_values
     PARAM_MAP = {
@@ -550,7 +576,8 @@ def show_fault_management_ml(current_row, model, feature_columns, target_columns
 
 def show_recommendations_ml(current_row, model, feature_columns, target_columns):
     """Muestra las recomendaciones de mantenimiento"""
-    st.header("🔧 Recomendaciones Inteligentes")
+    with st.container():
+       st.header("🔧 Recomendaciones Inteligentes")
 
     # Preparar datos de sensores
     sensor_values = {
