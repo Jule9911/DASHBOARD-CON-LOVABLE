@@ -271,7 +271,7 @@ def get_parameter_status(value, param_name):
         return 'Normal', '#28A745'
 
 def main():
-    st.title("DASHBOARD MONITOREO GENERADOR - ML PREDICTIVO")
+    st.title("⚡DASHBOARD MONITOREO GENERADOR - ML PREDICTIVO")
     st.markdown("---")
 
     # Cargar datos y modelo
