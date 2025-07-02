@@ -32,6 +32,21 @@ FAULT_INFO = {
     'F11': {'parameter': 'Nivel de Refrigerante', 'condition': 'BAJO', 'description': 'Fuga en sellos o radiador', 'type': 'Térmica'}
 }
 
+#Costos estimados por falla
+FAULT_COSTS = {
+    'F01': {'repair_cost': (150, 400), 'preventive_cost': (50, 100), 'time': '2-4h'},
+    'F02': {'repair_cost': (200, 500), 'preventive_cost': (80, 150), 'time': '3-5h'},
+    'F03': {'repair_cost': (100, 300), 'preventive_cost': (30, 80), 'time': '1-2h'},
+    'F04': {'repair_cost': (250, 600), 'preventive_cost': (100, 200), 'time': '4-6h'},
+    'F05': {'repair_cost': (300, 700), 'preventive_cost': (120, 250), 'time': '4-7h'},
+    'F06': {'repair_cost': (400, 900), 'preventive_cost': (150, 300), 'time': '5-8h'},
+    'F07': {'repair_cost': (80, 200), 'preventive_cost': (40, 100), 'time': '2-3h'},
+    'F08': {'repair_cost': (350, 800), 'preventive_cost': (200, 400), 'time': '6-10h'},
+    'F09': {'repair_cost': (50, 150), 'preventive_cost': (20, 60), 'time': '1-2h'},
+    'F10': {'repair_cost': (500, 1200), 'preventive_cost': (300, 600), 'time': '8-12h'},
+    'F11': {'repair_cost': (200, 600), 'preventive_cost': (100, 300), 'time': '3-6h'}
+}
+
 # Matriz de decisión para urgencia basada en parámetros del sensor
 def determine_urgency_and_actions(fault_code, sensor_values):
     """Determina la urgencia y acciones basado en los valores de sensores y recursos adicionales"""
@@ -321,7 +336,15 @@ def main():
         show_fault_management_ml(current_row, model, feature_columns, target_columns)
 
     with tab4:
-        show_recommendations_ml(current_row, model, feature_columns, target_columns)
+         show_recommendations_ml(
+        current_row=current_row,  # La fila actual de datos
+        model=model,              # Tu modelo cargado
+        feature_columns=feature_columns,  # Columnas de características
+        target_columns=target_columns,    # Columnas objetivo
+        auto_refresh=auto_refresh,        # Valor del checkbox
+        refresh_interval=refresh_interval, # Valor del slider
+        max_samples=len(df)-1 if df is not None else 0  # Número máximo de muestras
+    )
 
     # Auto-refresh
     if auto_refresh:
@@ -574,11 +597,10 @@ def show_fault_management_ml(current_row, model, feature_columns, target_columns
         with col4:
             st.metric("🟢 Ninguna", urgency_counts['Ninguna'])
 
-def show_recommendations_ml(current_row, model, feature_columns, target_columns):
-    """Muestra las recomendaciones de mantenimiento"""
-    with st.container():
-       st.header("🔧 Recomendaciones Inteligentes")
-
+def show_recommendations_ml(current_row, model, feature_columns, target_columns, auto_refresh=False, refresh_interval=10, max_samples=0):
+    """Muestra las recomendaciones de mantenimiento con análisis de costos"""
+    st.header("🔧 Recomendaciones Inteligentes")
+    
     # Preparar datos de sensores
     sensor_values = {
         'presion_aceite': current_row['presion_aceite'],
@@ -589,22 +611,25 @@ def show_recommendations_ml(current_row, model, feature_columns, target_columns)
         'nivel_refrigerante': current_row['nivel_refrigerante']
     }
 
+    # Función para parsear tiempos
+    def parse_time(time_str):
+        """Convierte formatos '3h' o '3-6h' a valor numérico (promedio)"""
+        try:
+            clean_str = time_str.replace('h', '').strip()
+            if '-' in clean_str:
+                parts = list(map(int, clean_str.split('-')))
+                return sum(parts) / len(parts)  # Retorna el promedio
+            return int(clean_str)
+        except:
+            return 0  # Valor por defecto si hay error
+
     # Obtener fallas detectadas por ML
     if model is not None and feature_columns is not None:
         sensor_data = [current_row[col] for col in feature_columns]
         detected_faults, fault_probabilities = predict_faults_with_model(model, feature_columns, target_columns, sensor_data)
 
         if detected_faults:
-            # Agrupar por tipo de falla
-            fault_types = {}
-            for fault_code in detected_faults:
-                fault_info = FAULT_INFO[fault_code]
-                fault_type = fault_info['type']
-                if fault_type not in fault_types:
-                    fault_types[fault_type] = []
-                fault_types[fault_type].append(fault_code)
-
-       # Plan de mantenimiento consolidado
+            # Plan de mantenimiento consolidado
             st.markdown("---")
             st.subheader("📋 Plan de Mantenimiento Inteligente")
 
@@ -623,44 +648,85 @@ def show_recommendations_ml(current_row, model, feature_columns, target_columns)
                     preventive_faults.append(fault)
 
             if critical_faults:
-                st.error("🔴 **ACCIÓN CRÍTICA REQUERIDA - PARAR EQUIPO**")
-                for fault in critical_faults:
-                    _, actions = determine_urgency_and_actions(fault, sensor_values)
-                    st.write(f"• {fault}: {actions}")
+                with st.expander("🔴 **ACCIÓN CRÍTICA REQUERIDA - PARAR EQUIPO**", expanded=True):
+                    for fault in critical_faults:
+                        urgency, actions = determine_urgency_and_actions(fault, sensor_values)
+                        cost = FAULT_COSTS.get(fault, {})
+                        time_estimate = FAULT_COSTS.get(fault, {}).get('time', '0h')
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**{fault}**: {actions}")
+                        with col2:
+                            st.metric("Costo reparación", f"${cost.get('repair_cost', (0,0))[1]} USD")
+                        
+                        st.caption(f"⏱️ Tiempo estimado: {time_estimate} (promedio: {parse_time(time_estimate):.1f} horas)")
 
             if immediate_faults:
-                st.warning("🟠 **PROGRAMAR MANTENIMIENTO URGENTE (24-48H)**")
-                for fault in immediate_faults:
-                    _, actions = determine_urgency_and_actions(fault, sensor_values)
-                    st.write(f"• {fault}: {actions}")
+                with st.expander("🟠 **MANTENIMIENTO URGENTE (24-48H)**", expanded=True):
+                    for fault in immediate_faults:
+                        urgency, actions = determine_urgency_and_actions(fault, sensor_values)
+                        cost = FAULT_COSTS.get(fault, {})
+                        time_estimate = FAULT_COSTS.get(fault, {}).get('time', '0h')
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**{fault}**: {actions}")
+                        with col2:
+                            st.metric("Costo reparación", f"${cost.get('repair_cost', (0,0))[1]} USD")
+                        st.caption(f"⏱️ Tiempo estimado: {time_estimate} (promedio: {parse_time(time_estimate):.1f} horas)")
 
             if preventive_faults:
-                st.info("🟡 **MANTENIMIENTO PREVENTIVO (1-2 SEMANAS)**")
-                for fault in preventive_faults:
-                    _, actions = determine_urgency_and_actions(fault, sensor_values)
-                    st.write(f"• {fault}: {actions}")
+                with st.expander("🟡 **MANTENIMIENTO PREVENTIVO (1-2 SEMANAS)**", expanded=True):
+                    for fault in preventive_faults:
+                        urgency, actions = determine_urgency_and_actions(fault, sensor_values)
+                        cost = FAULT_COSTS.get(fault, {})
+                        time_estimate = FAULT_COSTS.get(fault, {}).get('time', '0h')
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**{fault}**: {actions}")
+                        with col2:
+                            st.metric("Costo preventivo", f"${cost.get('preventive_cost', (0,0))[1]} USD")
+                        
+                        ahorro = cost.get('repair_cost', (0,0))[1] - cost.get('preventive_cost', (0,0))[1]
+                        st.caption(f"💵 Ahorro potencial: ${ahorro} USD | ⏱️ Tiempo: {time_estimate}")
 
-            # Estimación de costos dinámico
-            st.subheader("💰 Estimación de Costos Inteligente")
-
-            cost_estimates = {
-                'Crítica': 800,
-                'Inmediata': 400,
-                'Preventiva': 200
-            }
-
-            total_cost = 0
-            for fault in detected_faults:
-                urgency, _ = determine_urgency_and_actions(fault, sensor_values)
-                total_cost += cost_estimates.get(urgency, 150)
-
+            # Resumen financiero
+            st.markdown("---")
+            st.subheader("💰 Resumen Financiero")
+            
+            total_repair = sum(FAULT_COSTS.get(f, {}).get('repair_cost', (0,0))[1] for f in detected_faults)
+            total_preventive = sum(FAULT_COSTS.get(f, {}).get('preventive_cost', (0,0))[1] for f in detected_faults)
+            total_time = sum(parse_time(FAULT_COSTS.get(f, {}).get('time', '0h')) for f in detected_faults)
+            savings = total_repair - total_preventive
+            
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Costo Estimado", f"${total_cost:,}")
+                st.metric("Costo total reparación", f"${total_repair} USD")
             with col2:
-                st.metric("Tiempo Estimado", f"{len(detected_faults) * 3} horas")
+                st.metric("Costo total preventivo", f"${total_preventive} USD")
             with col3:
-                st.metric("Técnicos Requeridos", max(1, len(detected_faults) // 2))
+                st.metric("Tiempo total estimado", f"{round(total_time)} horas (promedio)")
+
+            # Gráfico comparativo
+            st.markdown("### Comparativo Costo Reparación vs Preventivo")
+            cost_comparison = pd.DataFrame({
+                'Falla': detected_faults,
+                'Reparación': [FAULT_COSTS.get(f, {}).get('repair_cost', (0,0))[1] for f in detected_faults],
+                'Preventivo': [FAULT_COSTS.get(f, {}).get('preventive_cost', (0,0))[1] for f in detected_faults]
+            })
+
+            fig = px.bar(
+                cost_comparison.melt(id_vars='Falla', var_name='Tipo', value_name='Costo'),
+                x='Falla', 
+                y='Costo',
+                color='Tipo',
+                barmode='group',
+                color_discrete_map={'Reparación': '#FF4444', 'Preventivo': '#28A745'},
+                title="Comparación de costos por tipo de mantenimiento"
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
         else:
             st.success("✅ **GENERADOR EN ÓPTIMAS CONDICIONES**")
@@ -669,27 +735,39 @@ def show_recommendations_ml(current_row, model, feature_columns, target_columns)
             # Recomendaciones preventivas inteligentes
             st.subheader("🤖 Mantenimiento Preventivo Inteligente")
 
-            # Tabla mejorada con información más específica
-            data = {
-                "Componente": ["Filtros de Aire/Aceite", "Sistema de Inyección", "Turbocompresor", "Válvulas", "Sistema de Lubricación", "Sistema de Refrigeración"],
-                "Intervalo Tiempo": ["6 meses", "12-24 meses", "5 años", "5 años", "6 meses", "2 años"],
-                "Intervalo Horas": ["250 h", "1000 h", "2000 h", "2000 h", "250 h", "1000 h"],
-                "Riesgo si no se Mantiene": [
-                    "Reducción de eficiencia, daño del motor",
-                    "Aumento consumo, daño cámara combustión",
-                    "Pérdida potencia, daño completo del motor",
-                    "Pérdida compresión, sobrecalentamiento",
-                    "Daño catastrófico del motor",
-                    "Sobrecalentamiento, daño del motor"
-                ],
-                "Costo Preventivo": ["$150", "$400", "$1,500", "$2,000", "$200", "$300"]
-            }
+            # Tabla con costos reales
+            preventive_data = []
+            for fault_code, info in FAULT_INFO.items():
+                cost = FAULT_COSTS.get(fault_code, {})
+                preventive_data.append({
+                    "Falla": fault_code,
+                    "Componente": info['parameter'],
+                    "Frecuencia": "Trimestral" if 'Eléctrica' in info['type'] else "Semestral",
+                    "Costo Preventivo": cost.get('preventive_cost', (0,0))[1],
+                    "Costo Reparación": cost.get('repair_cost', (0,0))[1],
+                    "Tiempo Estimado": FAULT_COSTS.get(fault_code, {}).get('time', 'N/A')
+                })
 
-            df_maintenance = pd.DataFrame(data)
-            st.dataframe(df_maintenance, use_container_width=True)
+            st.dataframe(
+                pd.DataFrame(preventive_data),
+                column_config={
+                    "Costo Preventivo": st.column_config.NumberColumn(format="$%d"),
+                    "Costo Reparación": st.column_config.NumberColumn(format="$%d")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
     else:
         st.warning("⚠️ Modelo ML no disponible para generar recomendaciones inteligentes.")
 
+    # Auto-refresh
+    if auto_refresh:
+        time.sleep(refresh_interval)
+        if st.session_state.current_sample < max_samples:
+            st.session_state.current_sample += 1
+        else:
+            st.session_state.current_sample = 0
+        st.rerun()
 if __name__ == "__main__":
     main()
