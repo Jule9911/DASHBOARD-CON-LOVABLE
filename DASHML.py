@@ -11,8 +11,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Dashboard de Monitoreo Vehicular",
-    page_icon="🚗",
+    page_title="Dashboard de Monitoreo Generador",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -217,7 +217,7 @@ def get_parameter_status(value, param_name):
         'voltaje_alternador': {'min': 12, 'max': 16, 'ideal': 14},
         'temp_vacio': {'min': 50, 'max': 76, 'ideal': 70},
         'temp_carga': {'min': 70, 'max': 90, 'ideal': 80},
-        'nivel_refrigerante': {'min': 0, 'max': 1, 'ideal': 1}
+        'nivel_refrigerante': {'min': 1, 'max': 1, 'ideal': 1}
     }
 
     if param_name not in ranges:
@@ -284,7 +284,7 @@ def main():
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Monitoreo en Tiempo Real",
         "📈 Análisis Histórico",
-        "⚠️ Gestión de Fallas ML",
+        "⚠️ Gestión de Fallas",
         "🔧 Recomendaciones Inteligentes"
     ])
 
@@ -311,21 +311,21 @@ def main():
 
 def show_real_time_monitoring(current_row, model, feature_columns, target_columns):
     """Muestra el monitoreo en tiempo real"""
-    st.header("📊 Estado Actual del Vehículo")
+    st.header("📊 Estado Actual del Generador")
 
     # Timestamp simulado
     timestamp = datetime.now() - timedelta(minutes=st.session_state.current_sample)
     st.info(f"🕐 Última lectura: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Predicción ML en tiempo real
+    # Predicción en tiempo real
     if model is not None:
         sensor_data = [current_row[col] for col in feature_columns]
         detected_faults, probabilities = predict_faults_with_model(model, feature_columns, target_columns, sensor_data)
         
         if detected_faults:
-            st.error(f"🚨 MODELO ML DETECTÓ {len(detected_faults)} FALLA(S)")
+            st.error(f"🚨 SE DETECTARON {len(detected_faults)} FALLA(S)")
         else:
-            st.success("✅ MODELO ML: SIN FALLAS DETECTADAS")
+            st.success("✅SIN FALLAS DETECTADAS")
 
     # Métricas principales (resto del código igual)
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -459,8 +459,18 @@ def show_historical_analysis(df):
                 st.plotly_chart(fig_hist, use_container_width=True)
 
 def show_fault_management_ml(current_row, model, feature_columns, target_columns):
-    """Muestra la gestión de fallas usando ML"""
-    st.header("⚠️ Gestión de Fallas - MACHINE LEARNING")
+    """Muestra la gestión de fallas"""
+    st.header("⚠️ Gestión de Fallas")
+
+    # Mapeo de parámetros a claves de sensor_values
+    PARAM_MAP = {
+        "Presión de Aceite": "presion_aceite",
+        "Voltaje de Batería": "voltaje_bateria",
+        "Voltaje Alternador": "voltaje_alternador",
+        "Temperatura (Vacío)": "temp_vacio",
+        "Temperatura (Carga)": "temp_carga",
+        "Nivel de Refrigerante": "nivel_refrigerante"
+    }
 
     # Preparar datos de sensores para análisis
     sensor_values = {
@@ -472,12 +482,12 @@ def show_fault_management_ml(current_row, model, feature_columns, target_columns
         'nivel_refrigerante': current_row['nivel_refrigerante']
     }
 
-    # Predicción de fallas usando el modelo ML
+    # Predicción de fallas
     if model is not None and feature_columns is not None:
         sensor_data = [current_row[col] for col in feature_columns]
         detected_faults, fault_probabilities = predict_faults_with_model(model, feature_columns, target_columns, sensor_data)
 
-        st.subheader("Fallas dectectadas")
+        st.subheader("Fallas detectadas")
 
         if detected_faults:
             st.error(f"🚨 Se ha detectado {len(detected_faults)} FALLA(S)")
@@ -491,13 +501,17 @@ def show_fault_management_ml(current_row, model, feature_columns, target_columns
                 
                 # Probabilidad de la falla
                 probability = fault_probabilities[i] if i < len(fault_probabilities) else 0.0
+                
+                # Obtener el valor actual del parámetro
+                param_key = PARAM_MAP.get(fault_info['parameter'])
+                current_value = sensor_values.get(param_key, 'N/A')
 
                 st.markdown(f"""
                 <div style='border: 2px solid {urgency_color}; border-radius: 10px; padding: 15px; margin: 10px 0;'>
                     <h4 style='color: {urgency_color}; margin: 0;'>🤖 {fault_code} - {urgency}</h4>
                     <p><strong>Confianza del Modelo:</strong> {probability:.2%}</p>
                     <p><strong>Parámetro:</strong> {fault_info['parameter']}</p>
-                    <p><strong>Valor Actual:</strong> {sensor_values.get(fault_info['parameter'].lower().replace(' ', '_').replace('(', '').replace(')', ''), 'N/A')}</p>
+                    <p><strong>Valor Actual:</strong> {current_value}</p>
                     <p><strong>Descripción:</strong> {fault_info['description']}</p>
                     <p><strong>Tipo:</strong> {fault_info['type']}</p>
                     <hr>
@@ -535,8 +549,8 @@ def show_fault_management_ml(current_row, model, feature_columns, target_columns
             st.metric("🟢 Ninguna", urgency_counts['Ninguna'])
 
 def show_recommendations_ml(current_row, model, feature_columns, target_columns):
-    """Muestra las recomendaciones de mantenimiento basadas en ML"""
-    st.header("🔧 Recomendaciones Inteligentes - ML")
+    """Muestra las recomendaciones de mantenimiento"""
+    st.header("🔧 Recomendaciones Inteligentes")
 
     # Preparar datos de sensores
     sensor_values = {
@@ -563,28 +577,7 @@ def show_recommendations_ml(current_row, model, feature_columns, target_columns)
                     fault_types[fault_type] = []
                 fault_types[fault_type].append(fault_code)
 
-            # Mostrar recomendaciones por tipo
-            for fault_type, faults in fault_types.items():
-                st.subheader(f"🔧 Mantenimiento {fault_type} (Detectado por ML)")
-
-                for fault_code in faults:
-                    fault_info = FAULT_INFO[fault_code]
-                    urgency, actions = determine_urgency_and_actions(fault_code, sensor_values)
-                    urgency_color = URGENCY_COLORS[urgency]
-
-                    with st.expander(f"{fault_code} - {fault_info['description']}", expanded=True):
-                        st.markdown(f"""
-                        **Nivel de Urgencia:** <span style='color: {urgency_color}; font-weight: bold;'>{urgency}</span>
-
-                        **Parámetro Afectado:** {fault_info['parameter']}
-
-                        **Valor Actual:** {sensor_values.get(fault_info['parameter'].lower().replace(' ', '_').replace('(', '').replace(')', ''), 'N/A')}
-
-                        **Acción Recomendada:**
-                        {actions}
-                        """, unsafe_allow_html=True)
-
-            # Plan de mantenimiento consolidado
+       # Plan de mantenimiento consolidado
             st.markdown("---")
             st.subheader("📋 Plan de Mantenimiento Inteligente")
 
@@ -643,7 +636,7 @@ def show_recommendations_ml(current_row, model, feature_columns, target_columns)
                 st.metric("Técnicos Requeridos", max(1, len(detected_faults) // 2))
 
         else:
-            st.success("✅ **GENERADOR EN ÓPTIMAS CONDICIONES (SEGÚN ML)**")
+            st.success("✅ **GENERADOR EN ÓPTIMAS CONDICIONES**")
             st.info("El modelo de Machine Learning no detectó fallas. Continuar con mantenimiento preventivo.")
 
             # Recomendaciones preventivas inteligentes
