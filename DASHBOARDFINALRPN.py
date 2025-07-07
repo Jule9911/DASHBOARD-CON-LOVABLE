@@ -11,6 +11,13 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.ensemble import RandomForestClassifier
 
+if 'historical_data' not in st.session_state:
+    st.session_state.historical_data = pd.DataFrame()
+if 'current_data' not in st.session_state:
+    st.session_state.current_data = pd.DataFrame()
+if 'uploaded_file' not in st.session_state:
+    st.session_state.uploaded_file = None
+
 # Configuración de la página
 st.set_page_config(
     page_title="Dashboard de Monitoreo Generador - ML Predictivo",
@@ -239,6 +246,7 @@ def determine_urgency_and_actions(fault_code, sensor_values):
 
     current_value = sensor_values[param_name]
 
+
     # Condiciones específicas por falla
     if fault_code == 'F01':  # Presión de Aceite < 2
         if current_value < 1.0:
@@ -416,14 +424,16 @@ def get_parameter_status(value, param_name):
         return 'Normal', '#28A745'
 
 def load_data():
-    """Carga datos desde CSV local O archivo subido por el usuario"""
+    """Carga datos pero no los muestra hasta que se active la simulación"""
     uploaded_file = st.file_uploader(
-        "📤 Sube tu propio archivo (opcional)", 
-        type=['csv', 'xlsx', 'parquet', 'json']
+        "📤 Sube tu archivo de datos", 
+        type=['csv', 'xlsx', 'parquet', 'json'],
+        key="file_uploader"
     )
     
-    if uploaded_file:
+    if uploaded_file and uploaded_file != st.session_state.uploaded_file:
         try:
+            st.session_state.uploaded_file = uploaded_file
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
             elif uploaded_file.name.endswith('.xlsx'):
@@ -432,19 +442,36 @@ def load_data():
                 df = pd.read_parquet(uploaded_file)
             elif uploaded_file.name.endswith('.json'):
                 df = pd.read_json(uploaded_file)
-            st.success(f"Archivo {uploaded_file.name} cargado correctamente!")
+            
+            # Inicializamos los datos de simulación
+            st.session_state.full_dataset = df
+            st.session_state.current_data = pd.DataFrame()  # Datos mostrados
+            st.session_state.historical_data = pd.DataFrame()  # Datos acumulados
+            st.session_state.current_sample = 0
+            st.session_state.file_loaded = True
+            
+            st.success("✅ Archivo cargado correctamente! Activa la simulación para comenzar.")
             return df
         except Exception as e:
             st.error(f"❌ Error al cargar archivo: {str(e)}")
             return None
     
-    try:
-        df = pd.read_csv("Dataset_de_prueba__50_registros_ - Dataset_de_prueba__50_registros_t.csv")
-        st.info("✅ Usando dataset local por defecto")
-        return df
-    except FileNotFoundError:
-        st.error("❌ No se encontró el archivo local Dataset_de_prueba__50_registros_.csv")
-        return None
+    # Si no hay archivo subido, usar dataset local
+    elif not st.session_state.get('file_loaded', False):
+        try:
+            df = pd.read_csv("Dataset_de_prueba__50_registros_ - Dataset_de_prueba__50_registros_t.csv")
+            st.session_state.full_dataset = df
+            st.session_state.current_data = pd.DataFrame()
+            st.session_state.historical_data = pd.DataFrame()
+            st.session_state.current_sample = 0
+            st.session_state.file_loaded = True
+            st.info("ℹ️ Usando dataset local por defecto. Activa la simulación para comenzar.")
+            return df
+        except FileNotFoundError:
+            st.error("❌ No se encontró el archivo local Dataset_de_prueba__50_registros_.csv")
+            return None
+    
+    return None
 
 def load_model():
     """Carga el modelo entrenado y el preprocesador"""
@@ -1669,111 +1696,130 @@ def main():
     st.title("⚡DASHBOARD MONITOREO GENERADOR - ML PREDICTIVO")
     st.markdown("---")
 
-    # Cargar datos y modelo
+    # Cargar datos (solo prepara los datos, no los muestra aún)
     df = load_data()
     model, preprocessor, feature_columns, target_columns = load_model()
 
-    if df is None:
-        st.stop()
-
     # Sidebar para configuración
     st.sidebar.title("⚙️ Configuración")
-
-    # Mostrar estado del modelo
-    if model is not None:
-        st.sidebar.success("🤖 Modelo ML Cargado")
-    else:
-        st.sidebar.error("❌ Modelo ML No Disponible")
-
-    # Simulación de tiempo real
-    auto_refresh = st.sidebar.checkbox("🔄 Actualización Automática", value=False)
-    refresh_interval = st.sidebar.slider("Intervalo (segundos)", 1, 60, 10)
-
-    # Selector de muestra actual
-    if 'current_sample' not in st.session_state:
-        st.session_state.current_sample = 0
-
-    max_samples = len(df) - 1
-    st.session_state.current_sample = st.sidebar.number_input(
-        "Muestra Actual", 0, max_samples, st.session_state.current_sample
-    )
-
-    # Botones de control
-    col1, col2 = st.sidebar.columns(2)
-    if col1.button("⏮️ Anterior"):
-        if st.session_state.current_sample > 0:
-            st.session_state.current_sample -= 1
-            st.rerun()
-
-    if col2.button("⏭️ Siguiente"):
-        if st.session_state.current_sample < max_samples:
-            st.session_state.current_sample += 1
-            st.rerun()
-
-    # Obtener muestra actual
-    current_row = df.iloc[st.session_state.current_sample]
-
-    # Obtener fallas detectadas y sus probabilidades
-    sensor_values = {
-        'presion_aceite': current_row['presion_aceite'],
-        'voltaje_bateria': current_row['voltaje_bateria'],
-        'voltaje_alternador': current_row['voltaje_alternador'],
-        'temp_vacio': current_row['temp_vacio'],
-        'temp_carga': current_row['temp_carga'],
-        'nivel_refrigerante': current_row['nivel_refrigerante']
-    }
     
-    if model is not None:
-        detected_faults, fault_probabilities = predict_faults_with_model(
-            model,
-            preprocessor,
-            target_columns,
-            sensor_values
-        )
-    else:
-        detected_faults, fault_probabilities = [], []
-
-    # Crear pestañas
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Monitoreo en Tiempo Real",
-        "📈 Análisis Histórico",
-        "⚠️ Gestión de Fallas",
-        "🔧 Recomendaciones Inteligentes",
-        "🛑 Riesgo de Parada (FMEA)"
-    ])
-
-    with tab1:
-        show_real_time_monitoring(current_row, model, preprocessor, feature_columns, target_columns)
-
-    with tab2:
-        show_historical_analysis(df)
-
-    with tab3:
-        show_fault_management_ml(current_row, model, preprocessor, target_columns)
-
-    with tab4:
-        show_recommendations_ml(
-            current_row=current_row,
-            model=model,
-            preprocessor=preprocessor,
-            feature_columns=feature_columns,
-            target_columns=target_columns,
-            auto_refresh=auto_refresh,
-            refresh_interval=refresh_interval,
-            max_samples=len(df)-1 if df is not None else 0
-        )
-    
-    with tab5:
-        show_risk_analysis_enhanced(df, current_row, detected_faults, fault_probabilities)
-
-    # Auto-refresh
-    if auto_refresh:
-        time.sleep(refresh_interval)
-        if st.session_state.current_sample < max_samples:
-            st.session_state.current_sample += 1
+    # Solo mostrar controles si hay datos cargados
+    if st.session_state.get('file_loaded', False):
+        # Mostrar estado del modelo
+        if model is not None:
+            st.sidebar.success("🤖 Modelo ML Cargado")
         else:
-            st.session_state.current_sample = 0
-        st.rerun()
+            st.sidebar.error("❌ Modelo ML No Disponible")
+
+        # Controles de simulación
+        simulation_active = st.sidebar.checkbox("▶️ Iniciar Simulación", value=False, key='simulation_active')
+        auto_refresh = st.sidebar.checkbox("🔄 Modo Automático", value=False, key='auto_refresh')
+        
+        if simulation_active:
+            refresh_interval = st.sidebar.slider("Intervalo (segundos)", 1, 60, 2, key='refresh_interval')
+            
+            # Obtener el índice actual
+            current_idx = st.session_state.current_sample
+            max_samples = len(st.session_state.full_dataset) - 1
+            
+            # Obtener la fila actual
+            current_row = st.session_state.full_dataset.iloc[current_idx]
+            
+            # Agregar timestamp si no existe
+            if 'timestamp' not in current_row:
+                current_row['timestamp'] = datetime.now()
+            
+            # Agregar a los datos actuales e históricos
+            st.session_state.current_data = pd.DataFrame([current_row])
+            st.session_state.historical_data = pd.concat(
+                [st.session_state.historical_data, st.session_state.current_data],
+                ignore_index=True
+            )
+            
+            # Avanzar al siguiente índice
+            if current_idx < max_samples:
+                st.session_state.current_sample += 1
+            else:
+                st.sidebar.warning("⚠️ Fin del dataset alcanzado")
+                st.session_state.simulation_active = False
+            
+            # Mostrar progreso
+            progress = (current_idx + 1) / (max_samples + 1)
+            st.sidebar.progress(progress)
+            st.sidebar.caption(f"Muestra {current_idx + 1} de {max_samples + 1}")
+            
+            # Mostrar los datos actuales
+            st.subheader(f"📊 Datos Actuales (Muestra {current_idx + 1})")
+            st.dataframe(st.session_state.current_data, use_container_width=True)
+            
+            # Obtener fallas detectadas y sus probabilidades
+            sensor_values = {
+                'presion_aceite': current_row['presion_aceite'],
+                'voltaje_bateria': current_row['voltaje_bateria'],
+                'voltaje_alternador': current_row['voltaje_alternador'],
+                'temp_vacio': current_row['temp_vacio'],
+                'temp_carga': current_row['temp_carga'],
+                'nivel_refrigerante': current_row['nivel_refrigerante']
+            }
+            
+            if model is not None:
+                detected_faults, fault_probabilities = predict_faults_with_model(
+                    model,
+                    preprocessor,
+                    target_columns,
+                    sensor_values
+                )
+            else:
+                detected_faults, fault_probabilities = [], []
+
+            # Crear pestañas
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📊 Monitoreo en Tiempo Real",
+                "📈 Análisis Histórico",
+                "⚠️ Gestión de Fallas",
+                "🔧 Recomendaciones Inteligentes",
+                "🛑 Riesgo de Parada (FMEA)"
+            ])
+
+            with tab1:
+                show_real_time_monitoring(current_row, model, preprocessor, feature_columns, target_columns)
+
+            with tab2:
+                show_historical_analysis(st.session_state.historical_data)
+
+            with tab3:
+                show_fault_management_ml(current_row, model, preprocessor, target_columns)
+
+            with tab4:
+                show_recommendations_ml(
+                    current_row=current_row,
+                    model=model,
+                    preprocessor=preprocessor,
+                    feature_columns=feature_columns,
+                    target_columns=target_columns
+                )
+            
+            with tab5:
+                show_risk_analysis_enhanced(
+                    st.session_state.historical_data, 
+                    current_row, 
+                    detected_faults, 
+                    fault_probabilities
+                )
+
+            # Auto-refresh en modo automático
+            if auto_refresh and simulation_active:
+                time.sleep(refresh_interval)
+                st.rerun()
+            
+            # Botón para avanzar manualmente
+            if not auto_refresh and st.sidebar.button("⏭️ Siguiente Muestra"):
+                st.rerun()
+        
+        else:
+            st.info("ℹ️ Activa la simulación para comenzar a visualizar los datos")
+    else:
+        st.info("ℹ️ Sube un archivo de datos o usa el dataset local para comenzar")
 
 if __name__ == "__main__":
     main()
